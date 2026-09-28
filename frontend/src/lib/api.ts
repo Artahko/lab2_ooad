@@ -1,3 +1,7 @@
+import { signOut } from 'aws-amplify/auth'
+
+import { getIdToken } from '@/lib/auth'
+
 export type Participant = {
   id: string
   name: string
@@ -59,10 +63,19 @@ function errorMessage(detail: unknown, fallback: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await getIdToken()
   const response = await fetch(`${API_URL}/api${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+      ...init?.headers,
+    },
   })
+
+  // The session is gone (revoked, or the refresh token expired): sign out, which sends the
+  // user back to the login page (see AuthProvider).
+  if (response.status === 401) await signOut().catch(() => undefined)
 
   if (!response.ok) {
     let detail: unknown

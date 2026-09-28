@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { format } from 'date-fns'
+import { addHours, format, isSameDay } from 'date-fns'
 import { CalendarIcon } from 'lucide-react'
 import { Controller, useForm } from 'react-hook-form'
 import { toast } from 'sonner'
@@ -66,6 +66,17 @@ function toFormValues(meeting: Meeting): MeetingFormValues {
   }
 }
 
+/** A new meeting starting at `start` and lasting an hour (cut off at midnight). */
+function newMeetingValues(start: Date): MeetingFormValues {
+  const end = addHours(start, 1)
+  return {
+    ...defaultValues,
+    date: start,
+    startTime: format(start, 'HH:mm'),
+    endTime: isSameDay(start, end) ? format(end, 'HH:mm') : '23:59',
+  }
+}
+
 function combine(date: Date, time: string): string {
   const [hours, minutes] = time.split(':').map(Number)
   const result = new Date(date)
@@ -78,9 +89,11 @@ type Props = {
   onOpenChange: (open: boolean) => void
   /** The meeting to edit; omit to create a new one. */
   meeting?: Meeting | null
+  /** Prefilled start of a new meeting, e.g. the calendar slot that was clicked. */
+  initialStart?: Date | null
 }
 
-export function MeetingFormDialog({ open, onOpenChange, meeting }: Props) {
+export function MeetingFormDialog({ open, onOpenChange, meeting, initialStart }: Props) {
   const [datePickerOpen, setDatePickerOpen] = useState(false)
   const createMeeting = useCreateMeeting()
   const updateMeeting = useUpdateMeeting()
@@ -92,8 +105,10 @@ export function MeetingFormDialog({ open, onOpenChange, meeting }: Props) {
   })
 
   useEffect(() => {
-    if (open) form.reset(meeting ? toFormValues(meeting) : defaultValues)
-  }, [open, meeting, form])
+    if (!open) return
+    if (meeting) form.reset(toFormValues(meeting))
+    else form.reset(initialStart ? newMeetingValues(initialStart) : defaultValues)
+  }, [open, meeting, initialStart, form])
 
   const close = (next: boolean) => onOpenChange(next)
 

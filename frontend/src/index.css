@@ -5,6 +5,8 @@
 @import '@fontsource-variable/cormorant-garamond';
 
 @custom-variant dark (&:is(.dark *));
+/* Short viewports (small phones, landscape): the auth pages tighten up to fit one screen. */
+@custom-variant short (@media (max-height: 700px));
 
 @theme inline {
   /* Namelaka pairs a thin display serif (Hanol) with Avenir Next; these are the closest free Cyrillic-capable matches. */

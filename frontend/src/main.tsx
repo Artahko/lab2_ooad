@@ -1,10 +1,17 @@
 import { StrictMode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter } from 'react-router'
 
 import { Toaster } from '@/components/ui/sonner'
+import { AuthProvider } from '@/components/auth-provider'
+import { configureAuth } from '@/lib/auth'
 import App from './App.tsx'
 import './index.css'
+// Completes the Google (OAuth) redirect when the browser comes back to /login.
+import 'aws-amplify/auth/enable-oauth-listener'
+
+configureAuth()
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -13,7 +20,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <AuthProvider>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+      </AuthProvider>
       <Toaster position="top-right" />
     </QueryClientProvider>
   </StrictMode>,

@@ -1,21 +1,12 @@
-import { CalendarXIcon, MapPinIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { format, getHours, isToday, setHours, startOfHour } from 'date-fns'
+import { MapPinIcon, PencilIcon, PlusIcon, Trash2Icon } from 'lucide-react'
+import { Fragment } from 'react'
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { useMeetings } from '@/hooks/queries'
 import type { Meeting, Participant } from '@/lib/api'
-import { formatWhen } from '@/lib/format'
+import { meetingsOnDay } from '@/lib/calendar'
+import { formatTimeOnDay } from '@/lib/format'
 
 const MAX_BADGES = 3
 
@@ -42,7 +33,9 @@ function ParticipantBadges({ participants }: { participants: Participant[] }) {
 }
 
 type Props = {
-  onAdd: () => void
+  days: Date[]
+  meetings: Meeting[]
+  onCreateAt: (start: Date) => void
   onOpen: (meeting: Meeting) => void
   onEdit: (meeting: Meeting) => void
   onDelete: (meeting: Meeting) => void
@@ -84,7 +77,7 @@ function RowActions({
   )
 }
 
-/** Keyboard-reachable title; clicks bubble up to the row/card, which opens the details. */
+/** Keyboard-reachable title; clicks bubble up to the row, which opens the details. */
 function MeetingTitle({ meeting }: { meeting: Meeting }) {
   return (
     <button
@@ -96,128 +89,89 @@ function MeetingTitle({ meeting }: { meeting: Meeting }) {
   )
 }
 
-export function MeetingList({ onAdd, onOpen, onEdit, onDelete }: Props) {
-  const meetings = useMeetings()
-
-  if (meetings.isPending) {
-    return (
-      <div className="flex flex-col gap-3">
-        {Array.from({ length: 3 }, (_, i) => (
-          <Skeleton key={i} className="h-16 w-full rounded-[20px] bg-card" />
-        ))}
-      </div>
-    )
-  }
-
-  if (meetings.isError) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>Could not load meetings</AlertTitle>
-        <AlertDescription className="flex flex-col items-start gap-2">
-          <span>{meetings.error.message}</span>
-          <Button variant="outline" size="sm" onClick={() => meetings.refetch()}>
-            Retry
-          </Button>
-        </AlertDescription>
-      </Alert>
-    )
-  }
-
-  if (meetings.data.length === 0) {
-    return (
-      <div className="flex flex-col items-center gap-4 rounded-[20px] bg-card py-20 text-center">
-        <CalendarXIcon className="size-10 stroke-1 text-primary" />
-        <h2 className="text-3xl">No meetings yet</h2>
-        <p className="font-serif text-lg text-muted-foreground italic">
-          Plan the first one — it only takes a minute.
-        </p>
-        <Button onClick={onAdd}>
-          <PlusIcon />
-          Add meeting
-        </Button>
-      </div>
-    )
-  }
-
+function MeetingRow({
+  meeting,
+  day,
+  onOpen,
+  onEdit,
+  onDelete,
+}: { meeting: Meeting; day: Date } & Omit<Props, 'days' | 'meetings' | 'onCreateAt'>) {
+  const actions = <RowActions meeting={meeting} onEdit={onEdit} onDelete={onDelete} />
   return (
-    <>
-      {/* Wide screens: table */}
-      <div className="hidden rounded-[20px] bg-card px-2 py-1 md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Meeting</TableHead>
-              <TableHead>When</TableHead>
-              <TableHead>Place</TableHead>
-              <TableHead>Participants</TableHead>
-              <TableHead className="w-24">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {meetings.data.map((meeting) => (
-              <TableRow
-                key={meeting.id}
-                className="group cursor-pointer hover:bg-muted"
-                onClick={() => onOpen(meeting)}
-              >
-                <TableCell className="max-w-64 whitespace-normal">
-                  <MeetingTitle meeting={meeting} />
-                  {meeting.description && (
-                    <div
-                      className="truncate text-sm text-muted-foreground"
-                      title={meeting.description}
-                    >
-                      {meeting.description}
-                    </div>
-                  )}
-                </TableCell>
-                <TableCell>{formatWhen(meeting)}</TableCell>
-                <TableCell className="max-w-48 truncate" title={meeting.place}>
-                  {meeting.place}
-                </TableCell>
-                <TableCell className="whitespace-normal">
-                  <ParticipantBadges participants={meeting.participants} />
-                </TableCell>
-                <TableCell>
-                  <RowActions meeting={meeting} onEdit={onEdit} onDelete={onDelete} />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <div
+      className="group flex cursor-pointer flex-col gap-2 px-4 py-2.5 transition-colors hover:bg-muted md:grid md:grid-cols-[8rem_minmax(0,1fr)_minmax(0,12rem)_minmax(0,14rem)_auto] md:items-center md:gap-4"
+      onClick={() => onOpen(meeting)}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold tabular-nums">{formatTimeOnDay(meeting, day)}</span>
+        <div className="md:hidden">{actions}</div>
       </div>
+      <div className="flex min-w-0 flex-col items-start">
+        <MeetingTitle meeting={meeting} />
+        {meeting.description && (
+          <p className="w-full truncate text-sm text-muted-foreground" title={meeting.description}>
+            {meeting.description}
+          </p>
+        )}
+      </div>
+      <div className="flex min-w-0 items-center gap-1 text-sm" title={meeting.place}>
+        <MapPinIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate">{meeting.place}</span>
+      </div>
+      <ParticipantBadges participants={meeting.participants} />
+      <div className="hidden md:block">{actions}</div>
+    </div>
+  )
+}
 
-      {/* Narrow screens: cards */}
-      <div className="flex flex-col gap-3 md:hidden">
-        {meetings.data.map((meeting) => (
-          <Card
-            key={meeting.id}
-            className="group cursor-pointer transition-colors hover:bg-muted"
-            onClick={() => onOpen(meeting)}
-          >
-            <CardContent className="flex flex-col gap-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex min-w-0 flex-col items-start">
-                  <MeetingTitle meeting={meeting} />
-                  <div className="text-sm text-muted-foreground">{formatWhen(meeting)}</div>
-                </div>
-                <RowActions meeting={meeting} onEdit={onEdit} onDelete={onDelete} />
-              </div>
-              {meeting.description && (
-                <p className="line-clamp-2 text-sm text-muted-foreground">{meeting.description}</p>
+/** Default start for a meeting added from a day heading: 10:00, or the next full hour today. */
+function defaultStart(day: Date): Date {
+  const start = setHours(day, 10)
+  if (!isToday(day)) return start
+  const nextHour = startOfHour(new Date(Date.now() + 60 * 60 * 1000))
+  return getHours(nextHour) > 10 && isToday(nextHour) ? nextHour : start
+}
+
+/** Agenda: every visible day gets a heading, followed by its meetings. */
+export function MeetingList({ days, meetings, onCreateAt, ...handlers }: Props) {
+  return (
+    <div className="flex flex-col gap-4 pb-2">
+      {days.map((day) => {
+        const dayMeetings = meetingsOnDay(meetings, day)
+        return (
+          <section key={day.toISOString()} className="flex flex-col gap-1.5">
+            <div className="flex items-baseline gap-3 px-1">
+              <h2 className="text-xl">{format(day, 'EEEE')}</h2>
+              <span className="font-serif text-muted-foreground italic">
+                {format(day, 'd MMMM')}
+              </span>
+              {isToday(day) && <Badge>Today</Badge>}
+              <Button
+                variant="ghost"
+                size="xs"
+                className="ml-auto self-center"
+                aria-label={`Add meeting on ${format(day, 'EEEE, d MMMM')}`}
+                onClick={() => onCreateAt(defaultStart(day))}
+              >
+                <PlusIcon />
+                Add
+              </Button>
+            </div>
+            <div className="rounded-[20px] bg-card py-1">
+              {dayMeetings.length === 0 ? (
+                <p className="px-4 py-2 font-serif text-muted-foreground italic">No meetings</p>
+              ) : (
+                dayMeetings.map((meeting, i) => (
+                  <Fragment key={meeting.id}>
+                    {i > 0 && <div className="hairline mx-4" />}
+                    <MeetingRow meeting={meeting} day={day} {...handlers} />
+                  </Fragment>
+                ))
               )}
-              <div className="hairline" />
-              <div className="flex items-center gap-1 text-sm">
-                <MapPinIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{meeting.place}</span>
-              </div>
-              <ParticipantBadges participants={meeting.participants} />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    </>
+            </div>
+          </section>
+        )
+      })}
+    </div>
   )
 }

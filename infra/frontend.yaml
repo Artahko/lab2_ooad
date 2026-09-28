@@ -92,7 +92,17 @@ Resources:
         Comment: !Sub ${ProjectName} frontend
         Enabled: true
         DefaultRootObject: index.html
-        # The app has no client-side routes, so there is no 403/404 -> index.html fallback.
+        # Client-side routes (/home, /login, /signup) are not files in the bucket: S3 answers
+        # 403 for them, so serve index.html and let the router take over.
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
         HttpVersion: http2and3
         IPV6Enabled: true
         PriceClass: !Ref PriceClass

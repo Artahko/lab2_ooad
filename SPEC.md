@@ -200,17 +200,47 @@ A meeting with zero participants is allowed.
 
 ## 7. Frontend
 
-Single page built with shadcn/ui components.
+Built with shadcn/ui components; routing with `react-router`.
 
-### Main page: Meetings
+### Routes and auth
+
+| Path | Page | Access |
+|---|---|---|
+| `/` | redirects to `/home` | — |
+| `/home` | Meetings (below) | signed in; otherwise redirect to `/login`, then back |
+| `/profile` | Profile (below) | signed in; otherwise redirect to `/login`, then back |
+| `/login` | Login | signed out; otherwise redirect to `/home` |
+| `/signup` | Signup | signed out; otherwise redirect to `/home` |
+| anything else | redirects to `/home` | — |
+
+- **Login**: "Continue with Google" button, then email + password (show/hide toggle) and **Sign in**. Link to signup.
+- **Signup**: "Sign up with Google" button, then name, email, password (min 8 characters), confirm password (must match) and **Create account**. Link to login.
+- Forms use react-hook-form + zod. Errors appear under the fields; a failed request shows its message above the submit button.
+- The meetings top bar shows the user's initial (name and email on hover; links to `/profile`) and a **Sign out** button.
+- **Profile** (`/profile`): a back arrow to `/home`, the user's initial, name and email, then one card per change. The changes go to Cognito directly (Amplify); the app then refreshes the tokens, and the backend copies the new name and email from the ID token on the next request.
+  - **Name**: prefilled; **Save name** is enabled once it changes.
+  - **Email**: a new email, then the code Cognito sends to it (**Verify email**, **Send a new code**, **Cancel**). The email changes only after the code is entered (`AttributesRequireVerificationBeforeUpdate` in `infra/auth.yaml`).
+  - **Password**: current password, new password (min 8 characters), confirm (must match). A wrong current password shows "Current password is wrong".
+  - Google accounts cannot edit anything here (Google sets the name and email at every sign-in); the page says so instead of showing the forms.
+  - A **Sign out** button at the bottom.
+- Login and signup fit one screen without scrolling, down to 360×640. On short viewports (≤ 700px tall, the `short:` variant) the eyebrow and subtitle are hidden and spacing tightens. On wider screens, signup puts the password fields side by side.
+- **No auth backend yet.** `src/lib/auth.ts` (`authApi`) is a stub: every sign-in succeeds, Google returns a demo user, and the session is the user object in `localStorage` (`meetings.session`). Replace it with `/api/auth/*` calls and a redirect to Google OAuth when the backend exists. The meetings API is not protected.
+- Deep links need an `index.html` fallback: nginx has `try_files`, and CloudFront maps 403/404 to `/index.html`.
+
+### Main page: Meetings (`/home`)
 
 - **Header** with the app name and an **"Add meeting"** button.
-- **Meetings list** — a shadcn `Table` (or `Card` per meeting on narrow screens) showing:
+- **Layout** (like Google Calendar): the page fills the viewport. One compact top bar holds the app name, **Today** ‹ › with the visible date range, a List / Day / Week switcher (Radix `ToggleGroup`; icons only on phones), **Add meeting**, and the user's initial with a **Sign out** button. The active view fills the rest of the screen and scrolls inside it. List and Week move by 7 days, Day by 1. The app opens on today. Weeks start on Monday.
+- **List view** — the anchor day ±3 days (7 days), grouped by date. Each day has a heading (weekday, date, "Today" badge) and its meetings, or "No meetings". Each row shows:
+  - the time on that day (`10:00–11:00`; a meeting that spans several days shows `from 18:00`, `until 09:00` or `All day`, and appears on every day it touches),
   - title, with the description as secondary text (truncated),
-  - date and time range (e.g. `Mon, 22 Sep 2026 · 10:00–11:00`, in the browser's local time zone),
   - place,
   - participants as `Badge`s (show the first 3, then `+N`),
-  - a **delete** icon button.
+  - **edit** and **delete** icon buttons.
+
+  Each day heading has a **+ Add** button that opens the Add meeting dialog for that day. The start is 10:00, or the next full hour if that is later today.
+- **Day view / Week view** — a time grid with one column per day. The grid shows all 24 hours in its own scroll area, with sticky day headings. It opens scrolled to the current time when today is visible, otherwise to 08:00 or the first earlier meeting. Titles of long meetings stay visible while scrolling, and short meetings show the title and time on one line. Overlapping meetings sit side by side. Today's column is tinted and has a current-time line. Clicking a meeting opens its details. Clicking an empty spot opens the Add meeting dialog with the date and a 1-hour slot starting at that time (rounded down to 30 minutes, cut off at 23:59). Hovering previews the slot as a dashed `+ 16:30` block. In the week view, clicking a day heading opens that day. On narrow screens the week scrolls horizontally.
+- Times use the browser's local time zone. All views filter the `GET /api/meetings` result on the client.
 - **Empty state**: "No meetings yet" with an "Add meeting" button.
 - **Loading state**: `Skeleton` rows. **Error state**: `Alert` with a retry button.
 
@@ -233,7 +263,7 @@ On submit: `POST /api/meetings`; on success close the dialog, refresh the list, 
 
 ### Meeting details and editing
 
-Clicking a meeting (table row or card) opens a details `Dialog` showing the title, time, place (a link if it is a URL), description, and participants with their emails, plus **Edit** and **Delete** buttons. Each row/card also has its own **Edit** (pencil) and **Delete** icon buttons.
+Clicking a meeting (list row or calendar block) opens a details `Dialog` showing the title, time, place (a link if it is a URL), description, and participants with their emails, plus **Edit** and **Delete** buttons. Each row/card also has its own **Edit** (pencil) and **Delete** icon buttons.
 
 Edit reuses the Add meeting dialog, prefilled, titled "Edit meeting", with a "Save changes" button. On submit: `PUT /api/meetings/{id}`; on success close the dialog, refresh the list, and show a success toast.
 
