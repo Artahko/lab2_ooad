@@ -1,3 +1,10 @@
+# Автоматично завантажуємо .env та очищаємо від Windows-символів \r
+if [ -f .env ]; then
+  set -a
+  source <(sed 's/\r$//' .env) 2>/dev/null || true
+  set +a
+fi
+
 # Shared setup for the infra scripts: credentials and settings come from .env via make.
 : "${AWS_ACCESS_KEY_ID:?Set AWS_ACCESS_KEY_ID in .env}"
 : "${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY in .env}"
