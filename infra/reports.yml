@@ -1,0 +1,247 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Event-driven weekly report generation architecture for Lab 3
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: lab3-meetings
+  RecipientEmail:
+    Type: String
+    Description: Email address to send weekly reports to
+
+Resources:
+  # ------------------------------------------------------------
+  # 1. S3 Storage & VPC Endpoint
+  # ------------------------------------------------------------
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: MailerLambdaPermission
+    Properties:
+      BucketName: !Sub '${ProjectName}-reports-${AWS::AccountId}'
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldReportsAfter90Days
+            Status: Enabled
+            ExpirationInDays: 90
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: 's3:ObjectCreated:*'
+            Function: !GetAtt MailerLambda.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: reports/
+                  - Name: suffix
+                    Value: .csv
+
+  S3VPCEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !ImportValue lab2-VpcId
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !ImportValue lab2-PrivateRouteTableId
+
+  # ------------------------------------------------------------
+  # 2. SQS Queue & DLQ
+  # ------------------------------------------------------------
+  ReportsDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-report-requests-dlq'
+
+  ReportsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${ProjectName}-report-requests'
+      VisibilityTimeout: 360  # 6x Lambda timeout (60s)
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt ReportsDLQ.Arn
+        maxReceiveCount: 3
+
+  # ------------------------------------------------------------
+  # 3. Builder Lambda (In VPC) & EventBridge Scheduler
+  # ------------------------------------------------------------
+  BuilderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: BuilderPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub 'arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}/*'
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource: !GetAtt ReportsQueue.Arn
+
+  BuilderLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-report-builder'
+      PackageType: Image
+      Code:
+        ImageUri: !ImportValue lab2-BackendImageUri
+      ImageConfig:
+        Command: ["app.reports.lambda_handler.handler"]
+      Timeout: 60
+      MemorySize: 512
+      Role: !GetAtt BuilderRole.Arn
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue lab2-LambdaSecurityGroupId
+        SubnetIds:
+          - !ImportValue lab2-PrivateSubnetId
+      Environment:
+        Variables:
+          DATABASE_URL: !ImportValue lab2-DatabaseUrl
+          REPORTS_BUCKET_NAME: !Sub '${ProjectName}-reports-${AWS::AccountId}'
+
+  BuilderEventSourceMapping:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      BatchSize: 1
+      EventSourceArn: !GetAtt ReportsQueue.Arn
+      FunctionName: !GetAtt BuilderLambda.Arn
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SendToSQS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt ReportsQueue.Arn
+
+  WeeklySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub '${ProjectName}-weekly-report-schedule'
+      ScheduleExpression: 'cron(0 7 ? * MON *)'
+      ScheduleExpressionTimezone: 'Europe/Kyiv'
+      FlexibleTimeWindow:
+        Mode: 'OFF'
+      Target:
+        Arn: !GetAtt ReportsQueue.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"week": null, "source": "schedule"}'
+
+  # ------------------------------------------------------------
+  # 4. Mailer Lambda (Public / Outside VPC) & SES
+  # ------------------------------------------------------------
+  MailerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MailerPermissions
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}/*'
+              - Effect: Allow
+                Action: ses:SendRawEmail
+                Resource: '*'
+
+  MailerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-report-mailer'
+      Runtime: python3.11
+      Handler: index.handler
+      Role: !GetAtt MailerRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          RECIPIENT_EMAIL: !Ref RecipientEmail
+          SENDER_EMAIL: !Sub 'reports@${RecipientEmail}'
+      Code:
+        ZipFile: |
+          import os
+          import boto3
+          import logging
+          from email.message import EmailMessage
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          s3 = boto3.client('s3')
+          ses = boto3.client('sesv2')
+
+          def handler(event, context):
+              logger.info("report-mailer triggered trigger=s3 event=%s", event)
+              print("report-mailer triggered trigger=s3")
+
+              record = event['Records'][0]['s3']
+              bucket = record['bucket']['name']
+              key = record['object']['key']
+
+              recipient = os.environ['RECIPIENT_EMAIL']
+              sender = recipient # Використовуємо верифіковану пошту
+
+              # Завантаження файлу з S3
+              obj = s3.get_object(Bucket=bucket, Key=key)
+              file_data = obj['Body'].read()
+              filename = key.split('/')[-1]
+
+              # Формування листа
+              msg = EmailMessage()
+              msg['Subject'] = f"Weekly Meetings Report: {filename}"
+              msg['From'] = sender
+              msg['To'] = recipient
+              msg.set_content(f"Hello,\n\nPlease find attached the weekly report: {filename}\n\nBest regards,\nMeetings App")
+
+              msg.add_attachment(file_data, maintype='text', subtype='csv', filename=filename)
+
+              ses.send_email(
+                  Content={'Raw': {'Data': msg.as_bytes()}}
+              )
+              logger.info("Successfully sent email to %s for report %s", recipient, filename)
+              return {"status": "sent"}
+
+  MailerLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt MailerLambda.Arn
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${ProjectName}-reports-${AWS::AccountId}'
+      SourceAccount: !Ref 'AWS::AccountId'
