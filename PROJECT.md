@@ -132,11 +132,3 @@ Meeting List: Fetches data via GET /api/meetings on mount and displays meetings 
 
 
 ---
-
-### Що робити далі після збереження файлу:
-
-1. **Закомітьте цей файл у гілку `main`:**
-   ```bash
-   git add PROJECT.md
-   git commit -m "docs: add PROJECT.md monorepo specification"
-   git push origin main
