@@ -81,6 +81,8 @@ main() {
       "CognitoUserPoolId=$pool_id" \
       "CognitoClientId=$client_id" \
       "CognitoJwks=$jwks" \
+      "GoogleClientId=${GOOGLE_CLIENT_ID:-}" \
+      "GoogleClientSecret=${GOOGLE_CLIENT_SECRET:-}" \
     --tags "${STACK_TAGS[@]}" \
     --no-fail-on-empty-changeset
   api_url="$(output "$BACKEND_STACK" ApiUrl)"

@@ -128,11 +128,8 @@ Resources:
       SupportedIdentityProviders:
         - COGNITO
         - Google
-      CallbackURLs:
-        - http://localhost:5173/login
-        - http://localhost:5173
-      LogoutURLs:
-        - http://localhost:5173
+      CallbackURLs: !Split [",", !Ref CorsOrigins]
+      LogoutURLs: !Split [",", !Ref CorsOrigins]
       ExplicitAuthFlows:
         - ALLOW_USER_PASSWORD_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH

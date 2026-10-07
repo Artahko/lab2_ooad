@@ -1,3 +1,6 @@
+import { useEffect } from 'react'
+import { signInWithRedirect } from 'aws-amplify/auth'
+
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Controller, useForm } from 'react-hook-form'
 import { Link, useLocation, useNavigate } from 'react-router'
@@ -32,6 +35,12 @@ type LocationState = {
 } | null
 
 export function LoginPage() {
+  useEffect(() => {
+    if (authConfigured) {
+      signInWithRedirect().catch(() => undefined)
+    }
+  }, [])
+
   const navigate = useNavigate()
   const state = useLocation().state as LocationState
   const from = state?.from ?? '/home'
