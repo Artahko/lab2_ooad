@@ -7,7 +7,7 @@ s ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help env build up down restart logs ps migrate migration seed psql test lint format \
-	dev-backend dev-frontend install clean deploy deploy-auth deploy-backend deploy-frontend destroy-auth destroy-backend destroy-frontend add-domain remove-domain infra-lint
+	dev-backend dev-frontend install clean tf-init tf-plan tf-apply tf-destroy tf-fmt infra-lint
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(firstword $(MAKEFILE_LIST)) | \
@@ -74,38 +74,21 @@ dev-frontend: ## Run Vite dev server on http://localhost:5173 (proxies /api to :
 clean: ## Stop the stack and delete the database volume
 	$(COMPOSE) down -v
 
-# AWS credentials and settings come from .env; export them only to the recipes below.
-AWS_ENV := AWS_ACCESS_KEY_ID="$(AWS_ACCESS_KEY_ID)" AWS_SECRET_ACCESS_KEY="$(AWS_SECRET_ACCESS_KEY)" \
-	AWS_SESSION_TOKEN="$(AWS_SESSION_TOKEN)" AWS_REGION="$(AWS_REGION)" \
-	PROJECT_NAME="$(or $(PROJECT_NAME),$(APP_NAME))" CORS_ORIGINS_AWS="$(CORS_ORIGINS_AWS)" \
-	LAMBDA_MEMORY="$(LAMBDA_MEMORY)" DOMAIN_NAME="$(DOMAIN_NAME)" HOSTED_ZONE_ID="$(HOSTED_ZONE_ID)" \
-	GOOGLE_CLIENT_ID="$(GOOGLE_CLIENT_ID)" GOOGLE_CLIENT_SECRET="$(GOOGLE_CLIENT_SECRET)"
+# Terraform Infrastructure Management
+tf-init: env ## Initialize Terraform
+	cd infra && terraform init
 
-deploy: deploy-backend deploy-frontend ## Deploy the whole app to AWS (after make deploy-auth)
+tf-plan: env ## Preview Terraform changes
+	cd infra && terraform plan
 
-deploy-auth: env ## Deploy Cognito (user pool + app client), print its settings and write them to .env
-	@$(AWS_ENV) ./infra/deploy-auth.sh
+tf-apply: env ## Apply Terraform configuration to AWS
+	cd infra && terraform apply -auto-approve
 
-deploy-backend: env ## Deploy backend (Lambda) + database (Aurora Serverless) to AWS, see infra/
-	@$(AWS_ENV) ./infra/deploy-backend.sh
+tf-destroy: env ## Destroy Terraform-managed infrastructure
+	cd infra && terraform destroy
 
-deploy-frontend: env ## Deploy frontend to S3 + CloudFront, wired to the Lambda URL (after deploy-backend)
-	@$(AWS_ENV) ./infra/deploy-frontend.sh
+tf-fmt: ## Format Terraform files recursively
+	cd infra && terraform fmt -recursive
 
-add-domain: env ## Attach DOMAIN_NAME from .env to the deployed frontend
-	@$(AWS_ENV) ./infra/add-domain.sh
-
-remove-domain: env ## Detach the custom domain and delete its certificate
-	@$(AWS_ENV) ./infra/remove-domain.sh
-
-destroy-auth: env ## Delete the Cognito stack (the user pool and its accounts are kept)
-	@$(AWS_ENV) ./infra/destroy-auth.sh
-
-destroy-backend: env ## Delete the AWS backend stacks (keeps a final DB snapshot)
-	@$(AWS_ENV) ./infra/destroy-backend.sh
-
-destroy-frontend: env ## Delete the S3 bucket, CloudFront distribution and domain certificate
-	@$(AWS_ENV) ./infra/destroy-frontend.sh
-
-infra-lint: ## Lint the CloudFormation templates
-	uvx cfn-lint infra/*.yaml
+infra-lint: ## Check formatting and validate Terraform configuration
+	cd infra && terraform fmt -check && terraform validate
