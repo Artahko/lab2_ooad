@@ -1,0 +1,62 @@
+# Lab 9 without a Google Cloud account: Spry's core run the way Google Cloud would run it.
+#   db       -> Cloud SQL for PostgreSQL (local PostgreSQL 17)
+#   api      -> Cloud Run (backend/Dockerfile.cloudrun, no Lambda adapter, PORT=8080)
+#   frontend -> Firebase Hosting (static build; /api/** rewritten to the API)
+#
+#   docker compose down   (stop the normal stack first: it also uses port 3000)
+#   docker compose -f docker-compose.cloudrun.yml up -d --build
+#   frontend: http://localhost:3000     API: http://localhost:8080/api/health
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: meetings
+      POSTGRES_PASSWORD: meetings
+      POSTGRES_DB: meetings
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata-cloudrun:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meetings -d meetings"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cloudrun
+    image: spry-backend:cloudrun
+    environment:
+      PORT: "8080" # Cloud Run sets this
+      DATABASE_URL: postgresql+asyncpg://meetings:meetings@db:5432/meetings
+      DB_POOL_SIZE: "2"
+      DB_MAX_OVERFLOW: "2"
+      CORS_ORIGINS: http://localhost:3000
+      # Sign-in stays on AWS: the same Cognito pool as in .env
+      COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
+      COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        COGNITO_USER_POOL_ID: ${COGNITO_USER_POOL_ID:-}
+        COGNITO_CLIENT_ID: ${COGNITO_CLIENT_ID:-}
+        COGNITO_DOMAIN: ${COGNITO_DOMAIN:-}
+        COGNITO_GOOGLE_ENABLED: ${COGNITO_GOOGLE_ENABLED:-false}
+    volumes:
+      - ./frontend/nginx.cloudrun.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata-cloudrun:

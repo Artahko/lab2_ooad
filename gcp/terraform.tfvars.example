@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars (not committed) and fill in.
+project_id   = "spry-artem-2026"
+region       = "us-central1"
+project_name = "spry"
+
+# The Firebase Hosting URL(s) of the frontend
+cors_origins = "https://spry-artem-2026.web.app,https://spry-artem-2026.firebaseapp.com"
+
+# Sign-in stays on AWS (public IDs from infra/ outputs)
+cognito_user_pool_id = ""
+cognito_client_id    = ""
+
+# "NEVER" stops the database at night: only the 10 GB of storage is billed (~$1.70/month)
+db_activation_policy = "ALWAYS"

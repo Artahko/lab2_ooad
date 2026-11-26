@@ -1,0 +1,26 @@
+# The backend image for Google Cloud Run (Lab 9).
+# Same app as Dockerfile, without the AWS Lambda Web Adapter: Cloud Run just sends HTTP
+# to the port in $PORT (8080 by default), so the image runs the same locally and in the cloud:
+#   docker build -f Dockerfile.cloudrun -t spry-backend:cloudrun .
+#   docker run -e PORT=8080 -e DATABASE_URL=... -p 8080:8080 spry-backend:cloudrun
+FROM python:3.14-slim
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-install-project
+
+COPY . .
+
+EXPOSE 8080
+# Migrations at start-up keep the lab simple; for a real service run them as a Cloud Run job.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

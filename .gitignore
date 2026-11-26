@@ -15,3 +15,8 @@ dist/
 infra/.terraform/
 infra/*.tfstate
 infra/*.tfstate.backup
+
+# Lab 9: Google Cloud Terraform
+gcp/.terraform/
+gcp/*.tfstate*
+gcp/terraform.tfvars
